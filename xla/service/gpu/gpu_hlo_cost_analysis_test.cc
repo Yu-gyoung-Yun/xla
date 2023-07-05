@@ -18,8 +18,10 @@ limitations under the License.
 // #include "xla/service/gpu/gpu_executable.h" // [yg]
 #include "xla/stream_executor/gpu/gpu_executor.h" // [yg]
 #include "xla/service/gpu/gpu_compiler.h" //[yg]
+#include "xla/service/gpu/gpu_executable.h" // [yg]
 #include "xla/tests/hlo_test_base.h"
 #include <nvtx3/nvToolsExt.h> // [yg]
+
 
 namespace xla {
 namespace gpu {
@@ -105,12 +107,46 @@ ENTRY entry {
   // GpuCompiler::RunBackend(/*std::unique_ptr<HloModule>= */std::move(module), /*se::StreamExecutor*= */executor, /*const Compiler::CompileOptions& =*/{/*device_allocator=*/nullptr});
   // se::gpu::ScopedActivateExecutorContext activation(gpu_executor);
 
-  // ref::gpu_compiler_test.cc
-  std::unique_ptr<xla::Executable> executable =
+  //  ref::gpu_compiler_test.cc
+  std::unique_ptr<xla::Executable> gpu_executable =
       backend()
           .compiler()
           ->RunBackend(module->Clone(), backend().default_stream_executor(),
-                         /*device_allocator=*/nullptr); // RunBackend로 하면 unique_ptr<xla::Executable>
+                         /*device_allocator=*/nullptr)
+          .value();// RunBackend로 하면 unique_ptr<xla::Executable>
+  TF_ASSERT_OK_AND_ASSIGN(
+        std::unique_ptr<Executable> executable,
+        backend().compiler()->RunBackend(
+            std::move(module), backend().default_stream_executor(),
+            backend().default_stream_executor()->GetAllocator()));
+  GpuExecutable* g_executable =
+      static_cast<GpuExecutable*>(executable.get());
+  absl::Span<const BufferAllocation> allocations =
+      g_executable->GetAllocations();
+  std::cout<<"BufferAllocation Size: "<<allocations.size()<<std::endl;
+  
+  // Check GPU Device
+  /*se::Platform* platform =
+      se::MultiPlatformManager::PlatformWithName(test_platform).value();
+  se::StreamExecutor* gpu_executor = platform->ExecutorForDevice(0).value();
+  const auto& description = gpu_executor->GetDeviceDescription();
+  //  ref:: platform_tuil.cc
+  if (gpu_executor->platform()->id() == se::cuda::kCudaPlatformId) {
+    // CUDA devices must have a minimum compute capability.
+    se::CudaComputeCapability cc = description.cuda_compute_capability();
+    if (!cc.IsAtLeast(kMinCudaComputeCapabilityMajor,
+                      kMinCudaComputeCapabilityMinor)) {
+      LOG(INFO) << "StreamExecutor cuda device (" << gpu_executor->device_ordinal()
+                << ") is of "
+                << "insufficient compute capability: "
+                << kMinCudaComputeCapabilityMajor << "."
+                << kMinCudaComputeCapabilityMinor << " required, "
+                << "device is " << cc.ToString();
+      return false;
+  }*/
+  //LocalClientOptions default_options;
+  //default_options.set_platform(platform);
+  //client_ = GetOrCreateLocalClientOrDie(default_options);
   //std::cout << compiled_module->ToString();
 
 }
