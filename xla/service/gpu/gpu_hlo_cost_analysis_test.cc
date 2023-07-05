@@ -126,12 +126,14 @@ ENTRY entry {
   std::cout<<"BufferAllocation Size: "<<allocations.size()<<std::endl;
   
   // Check GPU Device
-  /*se::Platform* platform =
+  se::Platform* platform =
       se::MultiPlatformManager::PlatformWithName(test_platform).value();
   se::StreamExecutor* gpu_executor = platform->ExecutorForDevice(0).value();
   const auto& description = gpu_executor->GetDeviceDescription();
+  se::CudaComputeCapability cc = description.cuda_compute_capability(); // 8.0 -> A100
+  std::cout<<"cc.ToString(): "<<cc.ToString()<<std::endl;
   //  ref:: platform_tuil.cc
-  if (gpu_executor->platform()->id() == se::cuda::kCudaPlatformId) {
+  /*if (gpu_executor->platform()->id() == se::cuda::kCudaPlatformId) {
     // CUDA devices must have a minimum compute capability.
     se::CudaComputeCapability cc = description.cuda_compute_capability();
     if (!cc.IsAtLeast(kMinCudaComputeCapabilityMajor,
