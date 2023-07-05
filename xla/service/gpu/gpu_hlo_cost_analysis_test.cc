@@ -21,10 +21,19 @@ limitations under the License.
 #include "xla/service/gpu/gpu_executable.h" // [yg]
 #include "xla/tests/hlo_test_base.h"
 #include <nvtx3/nvToolsExt.h> // [yg]
-
+#include "xla/tests/client_library_test_base.h" // [yg]
+#include "xla/client/client_library.h" // [yg]
 
 namespace xla {
 namespace gpu {
+
+LocalClient* GetOrCreateLocalClientOrDie(
+    const LocalClientOptions& client_options) {
+  StatusOr<LocalClient*> result =
+      ClientLibrary::GetOrCreateLocalClient(client_options);
+  TF_CHECK_OK(result.status()) << " could not create local client for testing";
+  return result.value();
+}
 
 namespace se = stream_executor; // [yg]
 
@@ -114,6 +123,14 @@ ENTRY entry {
           ->RunBackend(module->Clone(), backend().default_stream_executor(),
                          /*device_allocator=*/nullptr)
           .value();// RunBackend로 하면 unique_ptr<xla::Executable>
+  //EXPECT_EQ(OkStatus(), backend()
+  //                          .compiler()
+  //                          ->RunBackend(std::move(module),
+  //                                       backend().default_stream_executor(),
+  //                                       /*device_allocator=*/nullptr)
+  //                          .status());
+  
+  //
   TF_ASSERT_OK_AND_ASSIGN(
         std::unique_ptr<Executable> executable,
         backend().compiler()->RunBackend(
@@ -146,12 +163,19 @@ ENTRY entry {
                 << "device is " << cc.ToString();
       return false;
   }*/
-  //LocalClientOptions default_options;
-  //default_options.set_platform(platform);
-  //client_ = GetOrCreateLocalClientOrDie(default_options);
-  //std::cout << compiled_module->ToString();
 
+  //  ref:  client_library_test_base.cc
+  
 }
 
 }  // namespace gpu
 }  // namespace xla
+
+
+// ref: layout_assignment_test.cc
+/*EXPECT_EQ(OkStatus(), backend()
+                            .compiler()
+                            ->RunBackend(std::move(compiled_module),
+                                         backend().default_stream_executor(),
+                                         /*device_allocator=*/ //nullptr)
+                            //.status());*/
