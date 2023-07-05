@@ -14,11 +14,16 @@ limitations under the License.
 ==============================================================================*/
 
 #include "xla/service/gpu/gpu_hlo_cost_analysis.h"
-
+#include "xla/service/gpu/gpu_device_info.h" // [yg]
+// #include "xla/service/gpu/gpu_executable.h" // [yg]
+#include "xla/stream_executor/gpu/gpu_executor.h" // [yg]
+#include "xla/service/gpu/gpu_compiler.h" //[yg]
 #include "xla/tests/hlo_test_base.h"
 
 namespace xla {
 namespace gpu {
+
+namespace se = stream_executor; // [yg]
 
 class GpuHloCostAnalysisTest : public HloTestBase {
   HloCostAnalysis::ShapeSizeFunction ShapeSizeBytesFunction() const {
@@ -52,7 +57,7 @@ ENTRY entry {
 }
 )";
   TF_ASSERT_OK_AND_ASSIGN(auto module,
-                          ParseAndReturnVerifiedModule(hlo_string));
+                          ParseAndReturnVerifiedModule(hlo_string)); // unique_ptr<xla::VerifiedHloModule>
   ASSERT_IS_OK(module->entry_computation()->Accept(&analysis_));
   HloComputation* comp = module->entry_computation();
   const HloInstruction* conv1 = comp->GetInstructionWithName("conv1");
@@ -67,6 +72,42 @@ ENTRY entry {
   EXPECT_EQ(analysis_.bytes_accessed(*conv1),
             op0_size + op1_size + op2_size + out_size);
   EXPECT_EQ(analysis_.flop_count(*conv1), 159694848);
+
+  std::string test_platform = "cuda";
+  #if TENSORFLOW_USE_ROCM
+    test_platform = "rocm";
+  #endif
+  // GPU 0
+  /*se::Platform* platform =
+      se::MultiPlatformManager::PlatformWithName(test_platform).value();
+  se::StreamExecutor* executor = platform->ExecutorForDevice(0).value();
+  const xla::gpu::GpuDeviceInfo dev_info = xla::gpu::GetGpuDeviceInfo(executor); //from gpu_device_info.cc // GetGpuDeviceInfo(stream_exec->GetDeviceDescription());
+  absl::string_view name(dev_info.name);
+  std::cout<<"gpu NAME: "<<name<<"\n"; // NVIDIA A100-SXM4-80GB
+  std::cout<<"gpu threads_per_block_limit: "<<dev_info.threads_per_block_limit<<"\n"; //1024
+  
+  // GPU 1
+  se::StreamExecutor* executor_ = platform->ExecutorForDevice(1).value();
+  const xla::gpu::GpuDeviceInfo dev_info_ = xla::gpu::GetGpuDeviceInfo(executor);
+  absl::string_view name_(dev_info_.name);
+  std::cout<<"gpu NAME: "<<name_<<"\n"; // NVIDIA A100-SXM4-80GB
+  std::cout<<"gpu threads_per_block_limit: "<<dev_info_.threads_per_block_limit<<"\n"; //1024
+
+  se::gpu::GpuExecutor* gpu_executor = se::gpu::ExtractGpuExecutor(executor);
+  
+  // Build Executable // == compiled_module??
+  auto a = GpuCompiler(); */
+  // GpuCompiler::RunBackend(/*std::unique_ptr<HloModule>= */std::move(module), /*se::StreamExecutor*= */executor, /*const Compiler::CompileOptions& =*/{/*device_allocator=*/nullptr});
+  // se::gpu::ScopedActivateExecutorContext activation(gpu_executor);
+
+  std::unique_ptr<HloModule> compiled_module =
+      backend()
+          .compiler()
+          ->RunHloPasses(module->Clone(), backend().default_stream_executor(),
+                         /*device_allocator=*/nullptr)
+          .value();
+  std::cout << compiled_module->ToString();
+
 }
 
 TEST_F(GpuHloCostAnalysisTest, ReduceWindowWithOverlapsRepeatedReads) {
