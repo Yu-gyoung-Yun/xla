@@ -165,7 +165,6 @@ ENTRY entry {
   }*/
 
   //  ref:  client_library_test_base.cc
-  return 0;
 }
 
 }  // namespace gpu
