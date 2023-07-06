@@ -33,6 +33,8 @@ limitations under the License.
 
 // [yg]
 #include "xla/service/gpu/gpu_hlo_cost_analysis.h"
+#include "xla/service/gpu/gpu_device_info_for_tests.h"
+#include "xla/service/gpu/gpu_performance_model.h"
 
 namespace xla {
 namespace {
@@ -309,13 +311,28 @@ ENTRY entry {
   ASSERT_IS_OK(module->entry_computation()->Accept(&analysis_));
   HloInstruction* root = module->entry_computation()->root_instruction();
   //HloComputation* comp = module->entry_computation();
-  std::cout<<"analysis_.flop_count(): "<<analysis_.flop_count()<<"\n";
+  std::cout<<"analysis_.flop_count(): "<<analysis_.flop_count()<<"\n"; // xla/service/hlo_cost_analysis.h
   std::cout<<"analysis_.bytes_accessed(): "<<analysis_.bytes_accessed()<<"\n"; // Operand + Output + Constant
+  std::cout<<"analysis_.bytes_accessed(*root): "<<analysis_.bytes_accessed(*root)<<"\n";
   std::cout<<"analysis_.operand_bytes_accessed(*root, 0): "<<analysis_.operand_bytes_accessed(*root, 0)<<"\n";
   std::cout<<"analysis_.operand_bytes_accessed(*root, 1): "<<analysis_.operand_bytes_accessed(*root, 1)<<"\n";
   std::cout<<"analysis_.output_bytes_accessed(*root): "<<analysis_.output_bytes_accessed(*root)<<"\n";
-  std::cout<<"analysis_.bytes_accessed(*root): "<<analysis_.bytes_accessed(*root)<<"\n";
+  // ----------------------------------------
 
+  // -------[YG]: HloPerformanceModel -------
+  // GPU 0
+  se::Platform* platform =
+      se::MultiPlatformManager::PlatformWithName("cuda").value(); //  test_platform == "cuda"
+  se::StreamExecutor* executor = platform->ExecutorForDevice(0).value();
+  const xla::gpu::GpuDeviceInfo dev_info = xla::gpu::GetGpuDeviceInfo(executor); //from gpu_device_info.cc // GetGpuDeviceInfo(stream_exec->GetDeviceDescription());
+  absl::string_view name(dev_info.name);
+  std::cout<<"gpu NAME: "<<name<<"\n"; // NVIDIA A100-SXM4-80GB
+  std::cout<<"gpu threads_per_block_limit: "<<dev_info.threads_per_block_limit<<"\n"; //1024
+  
+  xla::gpu::GpuPerformanceModel::RunTimes t =
+      xla::gpu::GpuPerformanceModel::EstimateRunTimes(root, &analysis_, dev_info);
+  
+  
   std::vector<Literal> args;
   args.push_back(LiteralUtil::CreateR0<float>(0.1));
   args.push_back(LiteralUtil::CreateR0<float>(0.2));
@@ -324,6 +341,7 @@ ENTRY entry {
 
   // Alias-passthrough-params is only implemented on GPU.
 #ifdef XLA_TEST_BACKEND_GPU
+  // CUDA only exists --> No need to NVTX.Range~
   std::cout<<"here!!!!\n";
   RunAndCheck(std::move(module), args, /*donate_arguments=*/{false, false},
               /*expected_runtime_aliasing=*/{true, true}, expected);
