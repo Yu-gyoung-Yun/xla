@@ -23,7 +23,6 @@ limitations under the License.
 #include <nvtx3/nvToolsExt.h> // [yg]
 #include "xla/tests/client_library_test_base.h" // [yg]
 #include "xla/client/client_library.h" // [yg]
-
 namespace xla {
 namespace gpu {
 
@@ -130,18 +129,39 @@ ENTRY entry {
   //                                       /*device_allocator=*/nullptr)
   //                          .status());
   
-  //
+  // gpu_compiler_test.cc
+  const char* hlo_text = R"(
+  HloModule cluster
+
+  ENTRY main {
+    cst = f32[1]{0} constant({0})
+    ROOT tuple_out = (f32[1]{0}, f32[1]{0}, f32[1]{0}, f32[1]{0}) tuple(cst, cst, cst, cst)
+  }
+  )";
+  EXPECT_TRUE(RunAndCompare(hlo_text, ErrorSpec{0, 0}));
+  std::cout<<"After RunAndCompare: \n";
+  std::cout<<"backend().compiler(): "<<backend().compiler()<<"\n";
   TF_ASSERT_OK_AND_ASSIGN(
         std::unique_ptr<Executable> executable,
         backend().compiler()->RunBackend(
             std::move(module), backend().default_stream_executor(),
             backend().default_stream_executor()->GetAllocator()));
   GpuExecutable* g_executable =
-      static_cast<GpuExecutable*>(executable.get());
+      static_cast<GpuExecutable*>(executable.get()); //  executable.get() == params?
   absl::Span<const BufferAllocation> allocations =
       g_executable->GetAllocations();
   std::cout<<"BufferAllocation Size: "<<allocations.size()<<std::endl;
   
+
+  //std::cout<<"gpu_compiler\n";
+  //xla::gpu::GpuCompiler gpu_compiler;
+  //gpu_runtime_executable_
+  //std::unique_ptr<GpuRuntimeExecutable> gpu_runtime = g_executable->gpu_runtime_executable_;
+  
+  //auto param = &g_executable->Params; //  g_executable->Params;
+  //GpuExecutable::Params param;
+  //std::unique_ptr<GpuExecutable> a = g_executable->Create(param);
+
   // Check GPU Device
   se::Platform* platform =
       se::MultiPlatformManager::PlatformWithName(test_platform).value();
@@ -165,6 +185,7 @@ ENTRY entry {
   }*/
 
   //  ref:  client_library_test_base.cc
+  
 }
 
 }  // namespace gpu
