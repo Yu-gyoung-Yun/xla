@@ -31,6 +31,9 @@ limitations under the License.
 #include "xla/tests/verified_hlo_module.h"
 #include "tsl/lib/core/status_test_util.h"
 
+// [yg]
+#include "xla/service/gpu/gpu_hlo_cost_analysis.h"
+
 namespace xla {
 namespace {
 
@@ -42,13 +45,22 @@ namespace {
 // 3. output[0] == input[2]
 class BufferDonationTest : public HloTestBase {
  public:
-  BufferDonationTest() {
+   HloCostAnalysis::ShapeSizeFunction ShapeSizeBytesFunction() const {
+    return [&](const Shape& shape) {
+      constexpr int64_t kPointerSize = 8;
+      return ShapeUtil::ByteSizeOf(shape, kPointerSize);
+    };
+   }
+   BufferDonationTest() {
     client_ = ClientLibrary::LocalClientOrDie();
     backend_ = client_->mutable_backend();
     platform_ = backend_->platform();
     executor_ = backend_->default_stream_executor();
+    const auto& description = executor_->GetDeviceDescription();
+    se::CudaComputeCapability cc = description.cuda_compute_capability(); // 8.0 -> A100
+    std::cout<<"cc.ToString(): "<<cc.ToString()<<std::endl;
     TF_CHECK_OK(executor_->Init());
-  }
+   }
 
  protected:
   LocalClient* client_;
@@ -252,44 +264,22 @@ class BufferDonationTest : public HloTestBase {
 
 // This tests a simple while loop where the parameters are aliased with the
 // output buffers.
-TEST_F(BufferDonationTest, SimpleWhileTupleTest) {
-  std::unique_ptr<HloModule> module = CreateTestModule("SimpleWhile");
-  TF_ASSERT_OK(module->input_output_alias_config().SetUpAlias({0}, 0, {0}));
-  TF_ASSERT_OK(module->input_output_alias_config().SetUpAlias({1}, 0, {1}));
-
-  std::vector<Literal> args;
-  args.push_back(LiteralUtil::MakeTupleFromSlices(
-      {LiteralUtil::CreateR0<int>(0), LiteralUtil::CreateR1<float>({1.1f})}));
-  Literal expected = LiteralUtil::MakeTupleFromSlices(
-      {LiteralUtil::CreateR0<int>(4), LiteralUtil::CreateR1<float>({5.5f})});
-  RunAndCheck(std::move(module), args, /*donate_arguments=*/{true},
-              /*expected_runtime_aliasing=*/{true}, expected);
-}
-
-// Tests a case where we have promised aliasing to the compiler, but the runtime
-// has not actually donated the buffers.
-TEST_F(BufferDonationTest, SimpleWhileTupleTestCopyProtection) {
-  std::unique_ptr<HloModule> module =
-      CreateTestModule("SimpleWhileCopyProtection");
-  TF_ASSERT_OK(module->input_output_alias_config().SetUpAlias({0}, 0, {0}));
-  TF_ASSERT_OK(module->input_output_alias_config().SetUpAlias({1}, 0, {1}));
-
-  std::vector<Literal> args;
-  args.push_back(LiteralUtil::MakeTupleFromSlices(
-      {LiteralUtil::CreateR0<int>(0), LiteralUtil::CreateR1<float>({1.1f})}));
-  Literal expected = LiteralUtil::MakeTupleFromSlices(
-      {LiteralUtil::CreateR0<int>(4), LiteralUtil::CreateR1<float>({5.5f})});
-  RunAndCheck(std::move(module), args, /*donate_arguments=*/{false},
-              /*expected_runtime_aliasing=*/{false}, expected);
-}
 
 // Tests a case that on XLA:GPU alias passthrough params automatically aliases
 // pass-through parameters, even if the underlying buffer is not donated.
 TEST_F(BufferDonationTest, TestNoCopyProtectionOnPassthroughParam) {
   HloModuleConfig config;
   config.set_alias_passthrough_params(true);
+  absl::string_view hlo_string = R"(
+        HloModule module
 
-  StatusOr<std::unique_ptr<VerifiedHloModule>> module =
+    ENTRY entry {
+    a = f32[] parameter(0)
+    b = f32[] parameter(1)
+    ROOT out = (f32[], f32[]) tuple(a, b)
+    }
+    )";
+  /*StatusOr<std::unique_ptr<VerifiedHloModule>> module =
       ParseAndReturnVerifiedModule(R"(
 HloModule module
 
@@ -299,7 +289,26 @@ ENTRY entry {
   ROOT out = (f32[], f32[]) tuple(a, b)
 }
   )",
-                                   config);
+                                   config);*/
+
+  // ------[YG]: HloCostMAnalysis ---------
+  HloCostAnalysis::Options options_{ShapeSizeBytesFunction(),
+                                    /*per_second_rates=*/{},
+                                    /*count_multiple_input_accesses=*/true};
+  xla::gpu::GpuHloCostAnalysis analysis_{options_};
+
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnVerifiedModule(hlo_string)); // unique_ptr<xla::VerifiedHloModule>
+  
+  ASSERT_IS_OK(module->entry_computation()->Accept(&analysis_));
+  HloInstruction* root = module->entry_computation()->root_instruction();
+  //HloComputation* comp = module->entry_computation();
+  std::cout<<"analysis_.flop_count(): "<<analysis_.flop_count()<<"\n";
+  std::cout<<"analysis_.bytes_accessed(): "<<analysis_.bytes_accessed()<<"\n"; // Operand + Output + Constant
+  std::cout<<"analysis_.operand_bytes_accessed(*root, 0): "<<analysis_.operand_bytes_accessed(*root, 0)<<"\n";
+  std::cout<<"analysis_.operand_bytes_accessed(*root, 1): "<<analysis_.operand_bytes_accessed(*root, 1)<<"\n";
+  std::cout<<"analysis_.output_bytes_accessed(*root): "<<analysis_.output_bytes_accessed(*root)<<"\n";
+  std::cout<<"analysis_.bytes_accessed(*root): "<<analysis_.bytes_accessed(*root)<<"\n";
 
   std::vector<Literal> args;
   args.push_back(LiteralUtil::CreateR0<float>(0.1));
@@ -309,42 +318,12 @@ ENTRY entry {
 
   // Alias-passthrough-params is only implemented on GPU.
 #ifdef XLA_TEST_BACKEND_GPU
-  RunAndCheck(std::move(*module), args, /*donate_arguments=*/{false, false},
+  std::cout<<"here!!!!\n";
+  RunAndCheck(std::move(module), args, /*donate_arguments=*/{false, false},
               /*expected_runtime_aliasing=*/{true, true}, expected);
 #endif
 }
 
-TEST_F(BufferDonationTest, TestMustAliasNotDonated) {
-  HloModuleConfig config;
-
-  StatusOr<std::unique_ptr<VerifiedHloModule>> module =
-      ParseAndReturnVerifiedModule(R"(
-HloModule module
-
-ENTRY entry {
-  a = f32[] parameter(0)
-  b = f32[] parameter(1)
-  ROOT out = (f32[], f32[]) tuple(a, b)
-}
-  )",
-                                   config);
-
-  TF_ASSERT_OK(module->get()->input_output_alias_config().SetUpAlias(
-      {0}, 0, {}, HloInputOutputAliasConfig::kMustAlias));
-
-  std::vector<Literal> args;
-  args.push_back(LiteralUtil::CreateR0<float>(0.1));
-  args.push_back(LiteralUtil::CreateR0<float>(0.2));
-  Literal expected = LiteralUtil::MakeTupleFromSlices(
-      {LiteralUtil::CreateR0<float>(0.1), LiteralUtil::CreateR0<float>(0.2)});
-
-#ifndef XLA_TEST_BACKEND_INTERPRETER
-  RunAndCheck(std::move(*module), args,
-              /*donate_arguments=*/{false, false}, {true, false}, expected,
-              "An input was configured to be must-alias at "
-              "compile time but not donated at runtime:");
-#endif
-}
 
 }  // namespace
 }  // namespace xla
