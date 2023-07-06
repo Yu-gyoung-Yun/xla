@@ -271,12 +271,18 @@ TEST_F(BufferDonationTest, TestNoCopyProtectionOnPassthroughParam) {
   HloModuleConfig config;
   config.set_alias_passthrough_params(true);
   absl::string_view hlo_string = R"(
-        HloModule module
+    HloModule module, is_scheduled=true
+
+    add {
+    a0 = f32[] parameter(0)
+    a1 = f32[] parameter(1)
+    ROOT _ = f32[] add(a0, a1)
+    }
 
     ENTRY entry {
-    a = f32[] parameter(0)
-    b = f32[] parameter(1)
-    ROOT out = (f32[], f32[]) tuple(a, b)
+    p0 = f32[8,8] parameter(0)
+    c0 = f32[] constant(0)
+    ROOT _ = f32[3,4] reduce-window(p0, c0), window={size=4x5 stride=2x1}, to_apply=add
     }
     )";
   /*StatusOr<std::unique_ptr<VerifiedHloModule>> module =
