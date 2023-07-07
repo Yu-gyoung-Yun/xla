@@ -273,19 +273,39 @@ TEST_F(BufferDonationTest, TestNoCopyProtectionOnPassthroughParam) {
   HloModuleConfig config;
   config.set_alias_passthrough_params(true);
   absl::string_view hlo_string = R"(
-    HloModule module, is_scheduled=true
+    HloModule JaxprToHlo, entry_computation_layout={(f32[100]{0})->(f32[100]{0})}
 
-    add {
-    a0 = f32[] parameter(0)
-    a1 = f32[] parameter(1)
-    ROOT _ = f32[] add(a0, a1)
-    }
+%region_0.4 (Arg_0.5: f32[], Arg_1.6: f32[]) -> f32[] {
+  %Arg_0.5 = f32[] parameter(0)
+  %Arg_1.6 = f32[] parameter(1)
+  ROOT %maximum.7 = f32[] maximum(f32[] %Arg_0.5, f32[] %Arg_1.6), metadata={op_name="parallelize(JaxprToHlo)/jit(main)/reduce_max[axes=(0,)]" source_file="Softmax.py" source_line=141}
+}
 
-    ENTRY entry {
-    p0 = f32[8,8] parameter(0)
-    c0 = f32[] constant(0)
-    ROOT _ = f32[3,4] reduce-window(p0, c0), window={size=4x5 stride=2x1}, to_apply=add
-    }
+%region_1.15 (Arg_0.16: f32[], Arg_1.17: f32[]) -> f32[] {
+  %Arg_0.16 = f32[] parameter(0)
+  %Arg_1.17 = f32[] parameter(1)
+  ROOT %add.18 = f32[] add(f32[] %Arg_0.16, f32[] %Arg_1.17), metadata={op_name="parallelize(JaxprToHlo)/jit(main)/reduce_sum[axes=(0,)]" source_file="Softmax.py" source_line=141}
+}
+
+ENTRY %main.26 (Arg_0.1: f32[100]) -> (f32[100]) {
+  %Arg_0.1 = f32[100]{0} parameter(0)
+  %constant.3 = f32[] constant(-inf)
+  %reduce.8 = f32[] reduce(f32[100]{0} %Arg_0.1, f32[] %constant.3), dimensions={0}, to_apply=%region_0.4, metadata={op_name="parallelize(JaxprToHlo)/jit(main)/reduce_max[axes=(0,)]" source_file="Softmax.py" source_line=141}
+  %reshape.9 = f32[1]{0} reshape(f32[] %reduce.8), metadata={op_name="parallelize(JaxprToHlo)/jit(main)/broadcast_in_dim[shape=(1,) broadcast_dimensions=()]" source_file="Softmax.py" source_line=141}
+  %broadcast.10 = f32[1]{0} broadcast(f32[1]{0} %reshape.9), dimensions={0}, metadata={op_name="parallelize(JaxprToHlo)/jit(main)/sub" source_file="Softmax.py" source_line=141}
+  %reshape.11 = f32[] reshape(f32[1]{0} %broadcast.10), metadata={op_name="parallelize(JaxprToHlo)/jit(main)/sub" source_file="Softmax.py" source_line=141}
+  %broadcast.12 = f32[100]{0} broadcast(f32[] %reshape.11), dimensions={}, metadata={op_name="parallelize(JaxprToHlo)/jit(main)/sub" source_file="Softmax.py" source_line=141}
+  %subtract.13 = f32[100]{0} subtract(f32[100]{0} %Arg_0.1, f32[100]{0} %broadcast.12), metadata={op_name="parallelize(JaxprToHlo)/jit(main)/sub" source_file="Softmax.py" source_line=141}
+  %exponential.14 = f32[100]{0} exponential(f32[100]{0} %subtract.13), metadata={op_name="parallelize(JaxprToHlo)/jit(main)/exp" source_file="Softmax.py" source_line=141}
+  %constant.2 = f32[] constant(0)
+  %reduce.19 = f32[] reduce(f32[100]{0} %exponential.14, f32[] %constant.2), dimensions={0}, to_apply=%region_1.15, metadata={op_name="parallelize(JaxprToHlo)/jit(main)/reduce_sum[axes=(0,)]" source_file="Softmax.py" source_line=141}
+  %reshape.20 = f32[1]{0} reshape(f32[] %reduce.19), metadata={op_name="parallelize(JaxprToHlo)/jit(main)/broadcast_in_dim[shape=(1,) broadcast_dimensions=()]" source_file="Softmax.py" source_line=141}
+  %broadcast.21 = f32[1]{0} broadcast(f32[1]{0} %reshape.20), dimensions={0}, metadata={op_name="parallelize(JaxprToHlo)/jit(main)/div" source_file="Softmax.py" source_line=141}
+  %reshape.22 = f32[] reshape(f32[1]{0} %broadcast.21), metadata={op_name="parallelize(JaxprToHlo)/jit(main)/div" source_file="Softmax.py" source_line=141}
+  %broadcast.23 = f32[100]{0} broadcast(f32[] %reshape.22), dimensions={}, metadata={op_name="parallelize(JaxprToHlo)/jit(main)/div" source_file="Softmax.py" source_line=141}
+  %divide.24 = f32[100]{0} divide(f32[100]{0} %exponential.14, f32[100]{0} %broadcast.23), metadata={op_name="parallelize(JaxprToHlo)/jit(main)/div" source_file="Softmax.py" source_line=141}
+  ROOT %tuple.25 = (f32[100]{0}) tuple(f32[100]{0} %divide.24)
+}
     )";
   /*StatusOr<std::unique_ptr<VerifiedHloModule>> module =
       ParseAndReturnVerifiedModule(R"(
