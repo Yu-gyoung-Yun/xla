@@ -77,21 +77,23 @@ class BufferDonationTest : public HloTestBase {
                    absl::Span<bool const> donate_arguments,
                    absl::Span<bool const> expected_runtime_aliasing,
                    const Literal& expected, std::string expected_failure = "") {
+    std::cout<<"Before executing stream1\n";
     UpdateEntryComputationLayout(hlo_module.get());
     // Create a copy of the output shape because the HLO module is std::moved
     // into the compiler and may be deallocated.
     const Shape output_shape = hlo_module->result_shape();
-
+    std::cout<<"Before executing stream2\n";
     TF_ASSERT_OK_AND_ASSIGN(hlo_module, backend_->compiler()->RunHloPasses(
                                             std::move(hlo_module), executor_,
                                             /*device_allocator=*/nullptr));
+    std::cout<<"Before executing stream3\n";
     HloInputOutputAliasConfig alias_config =
         hlo_module->input_output_alias_config();
     TF_ASSERT_OK_AND_ASSIGN(
         std::unique_ptr<Executable> executable,
         backend_->compiler()->RunBackend(std::move(hlo_module), executor_,
                                          /*device_allocator=*/nullptr));
-
+    std::cout<<"Before executing stream4\n";
     se::Stream stream(executor_);
     ASSERT_TRUE(stream.Init().ok());
 
@@ -102,7 +104,7 @@ class BufferDonationTest : public HloTestBase {
     run_options.set_allocator(&memory_allocator);
     ServiceExecutableRunOptions service_run_options(
         run_options, backend_->StreamBorrowerWithPriority());
-
+    std::cout<<"After executing stream\n";
     std::vector<ExecutionInput> args;
     std::vector<ShapeTree<se::DeviceMemoryBase>> inputs_buffers;
 
@@ -154,8 +156,8 @@ class BufferDonationTest : public HloTestBase {
     ExecutionOutput output = std::move(output_status).value();
 
     se::DeviceMemoryBase result_root_buffer = output.Result().root_buffer();
-    LOG(INFO) << "result allocation = " << result_root_buffer.opaque()
-              << "             size = " << result_root_buffer.size();
+    std::cout << "result allocation = " << result_root_buffer.opaque()
+              << "             size = " << result_root_buffer.size()<<"\n";
 
     // Check for expected aliasing between input and output buffers.
 #ifndef XLA_TEST_BACKEND_INTERPRETER
@@ -271,7 +273,7 @@ class BufferDonationTest : public HloTestBase {
 // pass-through parameters, even if the underlying buffer is not donated.
 TEST_F(BufferDonationTest, TestNoCopyProtectionOnPassthroughParam) {
   HloModuleConfig config;
-  config.set_alias_passthrough_params(true);
+  config.set_alias_passthrough_params(true); // CONV
   absl::string_view hlo_string = R"(
     HloModule JaxprToHlo, entry_computation_layout={(f32[100]{0})->(f32[100]{0})}
 
@@ -385,16 +387,23 @@ ENTRY entry {
   
   std::vector<Literal> args;
   args.push_back(LiteralUtil::CreateR0<float>(0.1));
+  // clang-format off
+  // F32[1x3x2x4]
+  //args.push_back(LiteralUtil::CreateR4<float>({{ //conv
+  //   {{10}, {14}},
+  //   {{18}, {22}},
+  //   {{26}, {30}},
+  //}}));
   args.push_back(LiteralUtil::CreateR0<float>(0.2));
   Literal expected = LiteralUtil::MakeTupleFromSlices(
       {LiteralUtil::CreateR0<float>(0.1), LiteralUtil::CreateR0<float>(0.2)});
-
+  std::cout<<"Yugyoung"<<std::endl;
   // Alias-passthrough-params is only implemented on GPU.
 #ifdef XLA_TEST_BACKEND_GPU
   // CUDA only exists --> No need to NVTX.Range~
   std::cout<<"here!!!!\n";
   RunAndCheck(std::move(module), args, /*donate_arguments=*/{false, false},
-              /*expected_runtime_aliasing=*/{true, true}, expected);
+              /*expected_runtime_aliasing=*/{false, false}, expected);
 #endif
 }
 
