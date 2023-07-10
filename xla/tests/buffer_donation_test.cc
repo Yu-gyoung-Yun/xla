@@ -339,7 +339,6 @@ ENTRY entry {
   std::cout<<"analysis_.output_bytes_accessed(*root): "<<analysis_.output_bytes_accessed(*root)<<"\n";
   // ----------------------------------------
 
-  // -------[YG]: HloPerformanceModel -------
   // GPU 0
   se::Platform* platform =
       se::MultiPlatformManager::PlatformWithName("cuda").value(); //  test_platform == "cuda"
@@ -348,6 +347,37 @@ ENTRY entry {
   absl::string_view name(dev_info.name);
   std::cout<<"gpu NAME: "<<name<<"\n"; // NVIDIA A100-SXM4-80GB
   std::cout<<"gpu threads_per_block_limit: "<<dev_info.threads_per_block_limit<<"\n"; //1024
+  // ----- [YG]: Get HloInstruction.Sequence------
+  // ref: xla/service/hlo_module.cc
+  for (const HloComputation* computation : module->computations()) {
+    for (auto* instruction : computation->instructions()) {
+      std::cout<<"instr: "<<instruction->ToString()<<std::endl;
+      xla::gpu::GpuPerformanceModel::RunTimes t =
+        xla::gpu::GpuPerformanceModel::EstimateRunTimes(instruction, &analysis_, dev_info);
+      //for (HloComputation* called_computation :
+      //     instruction->called_computations()) {
+      //  nonroot_computations.insert(called_computation);
+      //}
+    }
+  }
+
+  // ----- Get a sequential schedule and do liveness analysis -----
+  // Update schedule.
+  /*auto computation = 
+  HloModule* parent_module = module->entry_computation()->parent();
+  const HloInstructionSequence& sequence =
+      parent_module->schedule().sequence(parent_module->entry_computation());
+  std::cout<<"hererererere"<<std::endl;
+  for (HloInstruction* instr : sequence.instructions()) {
+    std::cout<<"instr: "<<instr->ToString()<<std::endl;
+    xla::gpu::GpuPerformanceModel::RunTimes t =
+      xla::gpu::GpuPerformanceModel::EstimateRunTimes(instr, &analysis_, dev_info);
+  }*/
+  // return OkStatus();
+
+  // ----------------------------------[YG]
+  
+  // -------[YG]: HloPerformanceModel -------
   
   xla::gpu::GpuPerformanceModel::RunTimes t =
       xla::gpu::GpuPerformanceModel::EstimateRunTimes(root, &analysis_, dev_info);
